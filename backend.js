@@ -1,19 +1,13 @@
 const { SerialPort } = require('serialport');
-const { ReadlineParser } = require('@serialport/parser-readline'); // Correct way to import ReadlineParser
+const { ReadlineParser } = require('@serialport/parser-readline'); // Correct parser import
 
-// Configure serial ports for frontend (GUI) and STM32
-const frontendPort = new SerialPort({
-  path: '/dev/ttyUSB0',  // Replace with the correct frontend port
-  baudRate: 9600
-}); // Updated syntax for serialport >= 10.x
-
+// Configure serial port for STM32 (only one port is needed for communication with STM32)
 const stm32Port = new SerialPort({
-  path: '/dev/ttyUSB1',  // Replace with STM32 serial port path
+  path: '/dev/ttyUSB1',  // STM32 serial port path
   baudRate: 9600
-}); // Updated syntax for version 10.x or later
+});
 
-// Set up parsers for both serial ports
-const frontendParser = frontendPort.pipe(new ReadlineParser({ delimiter: '\r\n' }));
+// Set up parser for STM32
 const stm32Parser = stm32Port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
 
 // Send a command to STM32
@@ -29,49 +23,37 @@ function sendCommand(command) {
 // Handle incoming data from STM32
 stm32Parser.on('data', (data) => {
   console.log(`Received from STM32: ${data}`);
-  // Send data to frontend (LCD or touchscreen) after receiving it from STM32
-  frontendPort.write(`STM32 Status: ${data}\n`, (err) => {
-    if (err) {
-      console.error('Error sending data to frontend:', err);
+  // Send data to frontend (via IPC) after receiving it from STM32
+  mainWindow.webContents.send('status-update', data);  // Send to Electron frontend
+});
+
+// Handle incoming data from frontend (via IPC)
+const { app, BrowserWindow, ipcMain } = require('electron');
+let mainWindow;
+
+app.on('ready', () => {
+  mainWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js')  // Ensure preload.js is set
     }
   });
+
+  mainWindow.loadFile('index.html');
 });
 
-// Handle incoming data from frontend
-frontendParser.on('data', (data) => {
-  console.log(`Received from frontend: ${data}`);
-  
-  if (data === 'START_MOTOR') {
-    sendCommand('START_MOTOR');
-  }
-  // You can add more commands here as needed
+// Listen for frontend messages to trigger actions like starting the motor
+ipcMain.on('start-motor', (event) => {
+  sendCommand('START_MOTOR');
 });
 
-// Error handling for serial ports
-frontendPort.on('error', (err) => {
-  console.error('Frontend port error:', err);
-});
-
+// Error handling for serial port
 stm32Port.on('error', (err) => {
   console.error('STM32 port error:', err);
 });
 
-// Log when the serial ports open successfully
-frontendPort.on('open', () => {
-  console.log('Frontend serial port opened');
-});
-
+// Log when the serial port opens successfully
 stm32Port.on('open', () => {
   console.log('STM32 serial port opened');
 });
-
-// Example function to show start button on touchscreen (this can be adapted to your touchscreen)
-function displayStartButton() {
-  console.log('Displaying start button on screen...');
-  // Add code to interact with touchscreen here, e.g., using exec to show an image on the screen
-}
-
-module.exports = {
-  sendCommand,
-  displayStartButton
-};
